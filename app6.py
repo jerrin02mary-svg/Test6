@@ -2,142 +2,138 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from math import log, sqrt, exp, erf, isfinite
+from math import log, sqrt, exp, erf
 
-# -------------------------
-# Normal CDF (uses math.erf)
-# -------------------------
+# --------------------------------------------------------------------
+# NORMAL CDF (NO SCIPY)
+# --------------------------------------------------------------------
 def norm_cdf(x):
-    """CDF of standard normal using math.erf (no scipy)."""
-    return 0.5 * (1.0 + erf(x / sqrt(2.0)))
+    return 0.5 * (1.0 + erf(x / sqrt(2)))
 
-# -------------------------
-# Garman-Kohlhagen FX Option Price (no scipy)
-# -------------------------
+# --------------------------------------------------------------------
+# FX OPTION PRICING (Garman-Kohlhagen Model)
+# --------------------------------------------------------------------
 def fx_option_price(S, K, T, rd, rf, sigma, option_type="Call"):
-    """
-    S: spot
-    K: strike
-    T: time in years
-    rd, rf: continuous interest rates (decimals, e.g. 0.06)
-    sigma: volatility (decimal, e.g. 0.08)
-    option_type: "Call" or "Put"
-    """
-    # handle degenerate cases
     if T <= 0 or sigma <= 0:
-        # immediate expiry or zero vol -> intrinsic value discounted
-        disc_dom = exp(-rd * T)
-        disc_for = exp(-rf * T)
+        # intrinsic value (simplified)
         if option_type == "Call":
-            price = max(0.0, S * disc_for - K * disc_dom)
+            return max(0, S - K), None, None
         else:
-            price = max(0.0, K * disc_dom - S * disc_for)
-        # return d1,d2 as None for degenerate case
-        return price, None, None
+            return max(0, K - S), None, None
 
     sqrtT = sqrt(T)
-    d1 = (log(S / K) + (rd - rf + 0.5 * sigma * sigma) * T) / (sigma * sqrtT)
-    d2 = d1 - sigma * sqrtT
+    d1 = (log(S/K) + (rd - rf + 0.5*sigma*sigma)*T) / (sigma*sqrtT)
+    d2 = d1 - sigma*sqrtT
 
     if option_type == "Call":
-        price = S * exp(-rf * T) * norm_cdf(d1) - K * exp(-rd * T) * norm_cdf(d2)
+        price = S*exp(-rf*T)*norm_cdf(d1) - K*exp(-rd*T)*norm_cdf(d2)
     else:
-        price = K * exp(-rd * T) * norm_cdf(-d2) - S * exp(-rf * T) * norm_cdf(-d1)
+        price = K*exp(-rd*T)*norm_cdf(-d2) - S*exp(-rf*T)*norm_cdf(-d1)
 
     return price, d1, d2
 
-# -------------------------
-# Streamlit UI
-# -------------------------
-st.set_page_config(page_title="USD/INR FX Options", layout="wide")
-st.title("💱 USD/INR Forex Options — No SciPy (fixed)")
+# --------------------------------------------------------------------
+# STREAMLIT PAGE
+# --------------------------------------------------------------------
+st.set_page_config(page_title="USDINR FX Option Calculator", layout="wide")
 
-# Sidebar inputs
+st.title("💱 USD/INR Forex Options — ATM / ITM / OTM Breakdown")
+
+# Sidebar Inputs
 st.sidebar.header("Market Inputs")
-spot = st.sidebar.number_input("Spot Price (USD/INR)", value=83.20, format="%.4f")
-future = st.sidebar.number_input("Future Price (USD/INR)", value=83.50, format="%.4f")
-# Volatility as decimal e.g., 0.08 for 8% — keep UI label clear
-vol = st.sidebar.number_input("Volatility (σ) — decimal (e.g. 0.08 = 8%)", value=0.08, format="%.6f")
-rd = st.sidebar.number_input("Domestic Rate (rd) — decimal (e.g. 0.06)", value=0.065, format="%.6f")
-rf = st.sidebar.number_input("Foreign Rate (rf) — decimal (e.g. 0.05)", value=0.052, format="%.6f")
-exp_days = st.sidebar.number_input("Days to Expiry", min_value=0, value=30)
+spot = st.sidebar.number_input("Spot Price (USD/INR)", value=83.20)
+future = st.sidebar.number_input("Future Price (USD/INR)", value=83.50)
+vol = st.sidebar.number_input("Volatility (decimal, 0.08 = 8%)", value=0.08)
+rd = st.sidebar.number_input("Domestic Rate (rd)", value=0.065)
+rf = st.sidebar.number_input("Foreign Rate (rf)", value=0.052)
+days = st.sidebar.number_input("Days to Expiry", value=30)
 
-T = max(exp_days / 365.0, 0.0)
+T = max(days / 365, 0)
 
-# Show spot & future with colors
+# --------------------------------------------------------------------
+# DISPLAY SPOT & FUTURE
+# --------------------------------------------------------------------
 st.markdown(
     f"""
-    ### Market Prices
-    - **Spot:** <span style='color:#008000; font-weight:700;'>{spot}</span>  
-    - **Future:** <span style='color:#0057d9; font-weight:700;'>{future}</span>
-    """,
-    unsafe_allow_html=True,
+    ### 📌 Market Prices  
+    **Spot:** <span style='color:#008000;font-weight:bold'>{spot}</span>  
+    **Future:** <span style='color:#0057d9;font-weight:bold'>{future}</span>
+    """, unsafe_allow_html=True
 )
 
-# Option chain generation
-st.subheader("USD/INR Option Chain (generated)")
+# --------------------------------------------------------------------
+# OPTION CHAIN GENERATION
+# --------------------------------------------------------------------
+st.subheader("📊 Option Chain (Auto-Generated)")
 
-# generate strikes around spot
-step = 0.25
-lower = spot - 2.0
-upper = spot + 3.0
-strikes = np.round(np.arange(lower, upper + 1e-9, step), 4)
+strike_list = np.round(np.arange(spot - 2, spot + 3, 0.25), 4)
 
-# find nearest ATM strike
-atm_strike = float(min(strikes, key=lambda x: abs(x - spot)))
+atm_strike = float(min(strike_list, key=lambda x: abs(x - spot)))
 
 rows = []
-for K in strikes:
-    price_call, _, _ = fx_option_price(spot, K, T, rd, rf, vol, "Call")
-    price_put, _, _ = fx_option_price(spot, K, T, rd, rf, vol, "Put")
+for K in strike_list:
+    call, _, _ = fx_option_price(spot, K, T, rd, rf, vol, "Call")
+    put, _, _ = fx_option_price(spot, K, T, rd, rf, vol, "Put")
 
-    if abs(K - atm_strike) <= 1e-6:
+    if abs(K - atm_strike) < 0.001:
         status = "ATM"
     elif K < spot:
         status = "ITM"
     else:
         status = "OTM"
 
-    rows.append({"Strike": K, "Call": round(price_call, 6), "Put": round(price_put, 6), "Status": status})
+    rows.append([K, round(call, 6), round(put, 6), status])
 
-df = pd.DataFrame(rows)
+df = pd.DataFrame(rows, columns=["Strike", "Call", "Put", "Status"])
 
-# styling for ATM/ITM/OTM
-def row_style(row):
-    st = row["Status"]
-    if st == "ATM":
-        color = "background-color: #fff2cc"  # light yellow
-    elif st == "ITM":
-        color = "background-color: #d9ead3"  # light green
-    else:
-        color = "background-color: #f4cccc"  # light red
-    return [color] * len(row)
+# --------------------------------------------------------------------
+# SEPARATE TABLES: ITM / ATM / OTM
+# --------------------------------------------------------------------
+st.markdown("## 🎯 ATM Strike")
+st.dataframe(df[df["Status"] == "ATM"], use_container_width=True)
 
-st.dataframe(df.style.apply(row_style, axis=1), use_container_width=True)
+st.markdown("## 🟩 In The Money (ITM)")
+st.dataframe(df[df["Status"] == "ITM"], use_container_width=True)
 
-# Option calculator
-st.subheader("Option Calculator")
+st.markdown("## 🟥 Out of The Money (OTM)")
+st.dataframe(df[df["Status"] == "OTM"], use_container_width=True)
+
+# --------------------------------------------------------------------
+# OPTION CALCULATOR
+# --------------------------------------------------------------------
+st.subheader("🧮 Option Calculator")
 
 col1, col2 = st.columns(2)
+
 with col1:
-    K_input = st.number_input("Strike Price", value=atm_strike, format="%.4f")
-    opt_type = st.selectbox("Option Type", ["Call", "Put"])
+    K_input = st.number_input("Strike Price", value=atm_strike)
+    type_input = st.selectbox("Option Type", ["Call", "Put"])
+
 with col2:
-    vol_input = st.number_input("Volatility (σ) — decimal", value=vol, format="%.6f")
-    days_input = st.number_input("Days to expiry", min_value=0, value=exp_days)
+    sigma_input = st.number_input("Volatility (decimal)", value=vol)
+    days_input = st.number_input("Days to Expiry (for calculator)", value=days)
 
-T_calc = max(days_input / 365.0, 0.0)
+T_calc = max(days_input / 365, 0)
 
-price, d1, d2 = fx_option_price(spot, K_input, T_calc, rd, rf, vol_input, opt_type)
+price, d1, d2 = fx_option_price(spot, K_input, T_calc, rd, rf, sigma_input, type_input)
 
-st.markdown(f"### Option Price: **₹ {round(price, 6)}**")
-if d1 is None or d2 is None:
-    st.info("Degenerate case (zero volatility or zero time). Greeks unavailable.")
+st.markdown(f"### 💰 Option Price: **₹ {round(price, 6)}**")
+
+if d1 is None:
+    st.info("Zero volatility or expiry — Greeks unavailable.")
 else:
-    st.markdown(f"- d1: `{round(d1,6)}`  \n- d2: `{round(d2,6)}`")
+    st.write(f"**d1:** {round(d1,6)}")
+    st.write(f"**d2:** {round(d2,6)}")
 
 st.markdown("---")
-st.markdown("This app uses `math.erf` for the normal CDF (no SciPy). Deployable on Streamlit Cloud.")
+st.markdown("🚀 Fully compatible with Streamlit Cloud — SciPy removed.")
+
+
+    
+
+
+
+
 
    
 
